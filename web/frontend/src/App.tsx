@@ -1,4 +1,4 @@
-import { Bell, Car, Fan, Gamepad2, HeartPulse, LayoutGrid, LogOut, MapPin, RefreshCw } from "lucide-react";
+import { Bell, BellOff, Car, Fan, Gamepad2, HeartPulse, LayoutGrid, LogOut, MapPin, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { api, setGateHandler, setSignedOutHandler } from "./api";
@@ -7,6 +7,7 @@ import { Inbox } from "./components/Inbox";
 import { LiveToggle } from "./components/LiveToggle";
 import { Spinner } from "./components/ui";
 import { ago } from "./format";
+import { disablePush, enablePush, pushState, resumePush, type PushState } from "./push";
 import type { Me, Vehicle } from "./types";
 import { Climate } from "./views/Climate";
 import { Controls } from "./views/Controls";
@@ -29,6 +30,9 @@ const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
 /** "#/do/unlock" -> "unlock": a deep link that opens the hold-to-send page for one command. */
 const actionFromHash = () => /^#\/do\/([a-z_]+)$/.exec(location.hash)?.[1] ?? null;
 
+/** "#/inbox" opens the inbox (a notification's tap lands there). */
+const inboxFromHash = () => location.hash === "#/inbox";
+
 const tabFromHash = (): Tab => {
   const h = location.hash.replace(/^#\/?/, "") as Tab;
   return TABS.some((t) => t.id === h) ? h : "overview";
@@ -47,7 +51,10 @@ function SignedInApp() {
     try {
       const m = await api<Me>("/api/me");
       setMe(m);
-      if (m.signedIn) setVehicles(await api<Vehicle[]>("/api/vehicles"));
+      if (m.signedIn) {
+        void resumePush(!!m.push);
+        setVehicles(await api<Vehicle[]>("/api/vehicles"));
+      }
     } catch (e) {
       if (!(e as { status?: number }).status || (e as { status?: number }).status !== 401) setError((e as Error).message);
     }
@@ -111,7 +118,7 @@ function Shell() {
   const car = useCar();
   const [tab, setTab] = useState<Tab>(tabFromHash);
   const [action, setAction] = useState<string | null>(actionFromHash);
-  const [inbox, setInbox] = useState(false);
+  const [inbox, setInbox] = useState(inboxFromHash);
   const [menu, setMenu] = useState(false);
   const now = useNow(30_000);
 
@@ -119,6 +126,7 @@ function Shell() {
     const on = () => {
       setTab(tabFromHash());
       setAction(actionFromHash());
+      if (inboxFromHash()) setInbox(true);
     };
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
@@ -177,9 +185,13 @@ function Shell() {
                 >
                   {car.rememberPin ? "Forget saved PIN" : "Clear PIN"}
                 </button>
+                <NotificationsItem onDone={(message) => {
+                  car.toast(message);
+                  setMenu(false);
+                }} />
                 <button
                   role="menuitem"
-                  onClick={() => api("/api/gate/lock", { method: "POST" }).finally(() => location.reload())}
+                  onClick={() => disablePush().finally(() => api("/api/gate/lock", { method: "POST" }).finally(() => location.reload()))}
                   title="On the public URL, this browser will need the passcode again"
                 >
                   Lock this browser
@@ -251,6 +263,47 @@ function Shell() {
       </div>
       {inbox && <Inbox onClose={() => setInbox(false)} />}
     </div>
+  );
+}
+
+const PUSH_HINT: Partial<Record<PushState, string>> = {
+  "needs-install": "On iPhone, add Mottokar to the Home Screen first (Share → Add to Home Screen), then turn notifications on there.",
+  denied: "Notifications are blocked for this site. Allow them in the browser settings.",
+};
+
+/** Account-menu switch for push notifications about new inbox messages (hidden when the server has none). */
+function NotificationsItem({ onDone }: { onDone: (message: string) => void }) {
+  const [state, setState] = useState<PushState | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    pushState().then(setState, () => setState("unavailable"));
+  }, []);
+  if (!state || state === "unavailable") return null;
+
+  const toggle = async () => {
+    const hint = PUSH_HINT[state];
+    if (hint) return onDone(hint);
+    setBusy(true);
+    try {
+      if (state === "on") {
+        await disablePush();
+        onDone("Notifications turned off on this device");
+      } else {
+        await enablePush();
+        onDone("Notifications on: new inbox messages will be pushed to this device");
+      }
+      setState(await pushState());
+    } catch (e) {
+      onDone((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button role="menuitem" onClick={toggle} disabled={busy}>
+      {state === "on" ? <BellOff size={16} /> : <Bell size={16} />}
+      {busy ? "Working…" : state === "on" ? "Turn off notifications" : "Turn on notifications"}
+    </button>
   );
 }
 

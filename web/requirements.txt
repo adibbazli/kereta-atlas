@@ -1,4 +1,5 @@
 flask>=3.0,<4
 requests>=2.31,<3
 cryptography>=42
+google-auth>=2.30  # push notifications: Firestore + FCM over REST (web/firebase.py)
 pyarrow>=15  # reads the data.gov.my fuel price file

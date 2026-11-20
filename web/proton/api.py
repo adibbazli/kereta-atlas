@@ -145,9 +145,13 @@ def login(env: str, mobile_phone: str, password: str, device_id: str) -> Dict[st
 class ProtonApi:
     """Authenticated calls with one shared, lock-guarded token refresh."""
 
-    def __init__(self, session: Dict[str, Any], on_session: Callable[[Dict[str, Any]], None]):
+    def __init__(self, session: Dict[str, Any], on_session: Callable[[Dict[str, Any]], None],
+                 reload_session: Optional[Callable[[], Optional[Dict[str, Any]]]] = None):
         self.session = session
         self._on_session = on_session
+        # Returns the newest stored copy of this session, if another process (the push cron, or
+        # the browser's server) may have refreshed the tokens meanwhile. See push.py.
+        self._reload = reload_session
         self._lock = threading.Lock()
 
     @property
@@ -195,6 +199,9 @@ class ProtonApi:
             # Another thread already refreshed while we waited.
             if self.session["accessToken"] != stale_token:
                 return
+            # Someone else already refreshed (and maybe rotated the refresh token): adopt theirs.
+            if self._adopt_stored(stale_token):
+                return
             s = self.session
             try:
                 res = _call(HOSTS[s["env"]]["legacy"], "app/v1/member/tokenRefresh", "POST", legacy_headers(), body={
@@ -204,8 +211,26 @@ class ProtonApi:
                     "deviceId": s["deviceId"],
                 })
             except ProviderError:
+                # Lost a race with another refresher whose result was stored just now.
+                if self._adopt_stored(stale_token):
+                    return
                 raise ProviderError("Your Proton session expired. Sign in again.", "refresh", True) from None
             # Keep a rotated refresh token too, or the next refresh would use a dead one.
             self.session = {**s, "accessToken": res["accessToken"],
                             "refreshToken": res.get("refreshToken") or s["refreshToken"]}
             self._on_session(self.session)
+
+    def _adopt_stored(self, stale_token: str) -> bool:
+        if not self._reload:
+            return False
+        try:
+            stored = self._reload()
+        except Exception as e:  # the store being down must not break the refresh itself
+            log.warning("Reading the stored session failed: %s", e)
+            return False
+        if not stored or not stored.get("accessToken") or stored["accessToken"] == stale_token \
+                or stored.get("userId") != self.session.get("userId"):
+            return False
+        self.session = {**self.session, **stored}
+        self._on_session(self.session)
+        return True

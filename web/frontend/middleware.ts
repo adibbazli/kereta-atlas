@@ -1,9 +1,9 @@
-// Vercel Routing Middleware: forwards /api/* and /do/* to the Flask backend named by the
+// Vercel Routing Middleware: forwards /api/*, /do/* and /cron/* to the Flask backend named by the
 // BACKEND_SERVER env var (e.g. https://backend.example.com). Locally, vite.config.ts's dev
 // proxy does the same job; this file is only used on Vercel.
 
 export const config = {
-  matcher: ["/api/:path*", "/do/:path*"],
+  matcher: ["/api/:path*", "/do/:path*", "/cron/:path*"],
 };
 
 // Hop-by-hop / transport headers that must not be copied between connections.

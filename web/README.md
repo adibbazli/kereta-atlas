@@ -46,6 +46,50 @@ cloudflared prints a random `https://….trycloudflare.com` URL, which changes e
   - Changing the secret signs out every browser. Changing the passcode locks every browser out of the gate.
   - Sign out and "Lock this browser" only delete the cookie in that browser. A copied cookie stays valid until it expires or the secret changes.
 
+## Push notifications (FCM)
+
+New inbox messages can be pushed to the installed app or a desktop browser, even while it's closed. The server checks the inbox only when `/cron/notify` is called, so an external scheduler has to call it every few minutes. Vercel's own cron can't run that often.
+
+**Setup**
+
+1. In a Firebase project:
+   - Create a Firestore database (Native mode). Set its security rules to `allow read, write: if false;`, because only the server uses it.
+   - Add a Web app.
+   - Generate a Web Push key pair (Cloud Messaging → Web Push certificates).
+   - Download a service account key (Service accounts → Generate new private key).
+2. Set these on the backend:
+
+   | Variable | Value |
+   |---|---|
+   | `FIREBASE_SERVICE_ACCOUNT` | The service account JSON, raw or base64-encoded |
+   | `FIREBASE_WEB_CONFIG` | The web app config as JSON: `{"apiKey":…,"projectId":…,"messagingSenderId":…,"appId":…}` |
+   | `FIREBASE_VAPID_KEY` | The Web Push public key |
+   | `MOTTOKAR_CRON_SECRET` | A random string; the scheduler sends it |
+   | `MOTTOKAR_SECRET_KEY` | Required: the stored Proton tokens are sealed with it |
+
+3. Have a scheduler call the endpoint every 2–5 minutes. GET or POST both work:
+
+   ```bash
+   curl -fsS -H "Authorization: Bearer $MOTTOKAR_CRON_SECRET" https://<host>/cron/notify
+   ```
+
+   `?key=<secret>` works too, for schedulers that can't set headers. The host must be one the server answers to (see `MOTTOKAR_PUBLIC_HOSTS`); on Vercel, the frontend forwards `/cron/*` like `/api/*`. The reply counts what was checked, sent, deferred and expired.
+
+**How it works**
+
+- **Turning it on:** in the account menu, choose "Turn on notifications". The browser's FCM token and a copy of the Proton session are stored in Firestore, under a hash of the account. The session copy is sealed with `MOTTOKAR_SECRET_KEY`, like the cookie.
+- **Shared tokens:** the cron reads the inbox with that session. Whoever refreshes the Proton tokens, the cron or the browser's server, stores the result, and the other side adopts it when its own token stops working.
+- **No repeats:**
+  - Each message is claimed by creating `subscribers/<account>/sent/<id>` before it's pushed. That creation is atomic, so overlapping cron runs can't both send one message.
+  - The first check after subscribing only records what's already in the inbox.
+  - Messages that are already read, or older than the subscription, are never pushed.
+  - A push that fails after its claim is not retried.
+- **Expired session:** if the Proton session expires, the devices get one "notifications paused" message and polling stops. Signing in again in a browser that had notifications on subscribes again by itself.
+- **Turning it off:** signing out, "Lock this browser", or "Turn off notifications" removes that browser's device. FCM tokens that FCM reports as gone are deleted.
+- **Work per run:** each run stops starting new accounts after about 8 s. The rest go first on the next run.
+- **iPhone:** web push needs iOS 16.4 or later, and only works in the app added to the Home Screen, not in Safari.
+- **What Google sees:** the message title and text pass through Google's FCM servers.
+
 ## Install on iPhone (PWA)
 
 1. Open the tunnel URL in **Safari**, enter the passcode and sign in.
@@ -109,7 +153,7 @@ Sign out deletes the server-side session.
 
 - Requests are refused unless the `Host` is `127.0.0.1:<port>` or `localhost:<port>` (DNS-rebinding protection).
 - State-changing requests must be JSON and must come from the same origin (CSRF).
-- The CSP allows only same-origin scripts, styles and connections. Images may load from `https:` only (Proton's car renders); `http:` image URLs are dropped.
+- The CSP allows only same-origin scripts, styles and connections (plus `*.googleapis.com` when push notifications are configured, for FCM registration). Images may load from `https:` only (Proton's car renders); `http:` image URLs are dropped.
 - All server text is rendered with `textContent`.
 - Proton HTTPS calls keep certificate verification on.
 - The MQTT broker's certificate is pinned byte for byte, and checked before any byte is sent.
@@ -143,7 +187,7 @@ Sign out deletes the server-side session.
 
 - Layered 3D car scene (zip packs)
 - Paint override
-- Live inbox push (the inbox refreshes when opened)
+- Live inbox push over MQTT (the inbox refreshes when opened; new messages can still be pushed through FCM, see above)
 - iOS widgets, Shortcuts and Control Center
 - Engine-timer countdown
 - The Honda provider (still "coming soon" upstream)

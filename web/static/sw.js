@@ -1,6 +1,6 @@
 // Mottokar service worker: makes the app installable and opens the app shell offline.
 // It never caches /api/* — car data, sign-in and commands always go to the server.
-const CACHE = "mottokar-shell-v1";
+const CACHE = "mottokar-shell-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/favicon.svg", "/icons/apple-touch-icon.png", "/icons/icon-192.png"];
 
 self.addEventListener("install", (event) => {
@@ -44,4 +44,38 @@ self.addEventListener("fetch", (event) => {
         .catch(() => caches.match("/")),
     );
   }
+});
+
+// Push notifications (FCM, sent by the server's /cron/notify; see web/push.py). The server sends
+// data-only messages, so this worker decides what to show and no Firebase code runs here.
+self.addEventListener("push", (event) => {
+  let msg = {};
+  try {
+    msg = event.data ? event.data.json() : {};
+  } catch {
+    msg = {};
+  }
+  const data = msg.data || msg.notification || msg;
+  const title = data.title || "Mottokar";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || "",
+      tag: data.tag || undefined,
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      data: { url: data.url || "/#/inbox" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL((event.notification.data && event.notification.data.url) || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      const win = wins.find((w) => new URL(w.url).origin === self.location.origin);
+      if (win) return win.focus().then((w) => (w || win).navigate(url)).catch(() => self.clients.openWindow(url));
+      return self.clients.openWindow(url);
+    }),
+  );
 });

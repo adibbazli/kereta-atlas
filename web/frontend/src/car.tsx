@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { api, vinPath } from "./api";
 import { rangeMs } from "./format";
+import { disablePush } from "./push";
 import type { CommandDef, CommandResult, DataUsage, LiveState, Notice, StatusResponse, Timer, Trip, TripRange, Vehicle, VehicleStatus } from "./types";
 
 /**
@@ -442,6 +443,8 @@ export function CarProvider(props: {
   }, [liveActive, vin, toast]);
 
   const signOut = useCallback(async () => {
+    // Signing out on purpose also turns notifications off for this browser.
+    await disablePush().catch(() => {});
     await api("/api/signout", { method: "POST" }).catch(() => {});
     props.onSignedOut();
   }, [props]);

@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "firebase": "^12.19.0",
     "leaflet": "1.9",
     "lucide-react": "^1.57.0",
     "react": "^19.3.1",

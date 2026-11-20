@@ -11,6 +11,7 @@ requests to 127.0.0.1/localhost don't.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -24,6 +25,7 @@ from typing import Any, Dict, Optional
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 
 import demo
+import push
 import sealed
 from fuelprice import FuelPriceError, FuelPrices
 from gate import Gate, RateLimiter
@@ -146,13 +148,24 @@ def _client():
                 with _lock:
                     entry["rev"] += 1
                     entry["rec"] = {**entry["rec"], "session": session, "rev": entry["rev"]}
+                    rec_now = entry["rec"]
                     if not sealed.ENABLED:
                         data = _load()
                         if k in data:
                             data[k]["session"] = session
                             _save(data)
+                # This browser gets push notifications: the cron needs the new tokens too.
+                if push.ENABLED and rec_now.get("push"):
+                    try:
+                        push.sync_session(rec_now)
+                    except Exception as e:
+                        log.warning("Push: storing the refreshed session failed: %s", e)
 
-            entry["client"] = PROVIDERS[rec["provider"]]["client"](rec["session"], save_session)
+            def reload_session(entry=entry):
+                # The push cron may have refreshed (and rotated) the tokens: take its copy.
+                return push.load_session(entry["rec"]) if push.ENABLED and entry["rec"].get("push") else None
+
+            entry["client"] = PROVIDERS[rec["provider"]]["client"](rec["session"], save_session, reload_session)
             _clients[k] = entry
         g.entry = entry
     return entry["client"]
@@ -175,6 +188,8 @@ def client_ip() -> str:
 
 
 GATE_FREE = {"/api/gate"}
+# The Firebase SDK registers the browser for FCM with these Google APIs.
+PUSH_CONNECT = " https://*.googleapis.com" if push.ENABLED else ""
 
 
 @app.before_request
@@ -183,7 +198,8 @@ def guard():
     public = request.host not in ALLOWED_HOSTS
     if public and not _public_host(request.host):
         abort(400)
-    if request.method not in ("GET", "HEAD"):
+    # The cron endpoint is called by a scheduler, not a browser; its shared secret is the check.
+    if request.method not in ("GET", "HEAD") and not request.path.startswith("/cron/"):
         origin = request.headers.get("Origin")
         expected = {f"https://{request.host}"} if public else {f"http://{h}" for h in ALLOWED_HOSTS}
         if origin and origin not in expected:
@@ -200,7 +216,7 @@ def guard():
 def headers(resp):
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; "
-        "connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        f"connect-src 'self'{PUSH_CONNECT}; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
     resp.headers["X-Frame-Options"] = "DENY"
@@ -310,6 +326,7 @@ def pass_gate():
 
 @app.post("/api/gate/lock")
 def lock_gate():
+    _push_forget()
     if gate:
         gate.revoke(request.cookies.get(GATE_COOKIE))
     resp = jsonify(ok=True)
@@ -329,7 +346,7 @@ def me():
         return jsonify(signedIn=False)
     c = _client()
     return jsonify(signedIn=True, provider=rec["provider"], accountLabel=rec.get("accountLabel"),
-                   commands=c.provider["commands"])
+                   commands=c.provider["commands"], push=bool(g.entry["rec"].get("push")))
 
 
 @app.post("/api/signin")
@@ -366,6 +383,7 @@ def signin():
 def signout():
     sid = request.cookies.get(COOKIE)
     if sid:
+        _push_forget()
         k = _owner()
         with _lock:
             if not sealed.ENABLED:
@@ -590,6 +608,77 @@ def notices():
 def mark_read(notice_id):
     g.client.mark_read(notice_id)
     return jsonify(ok=True)
+
+
+# -- push notifications (push.py) --
+
+def _push_forget() -> None:
+    """This browser signs out or locks: stop pushing to the devices its sign-in subscribed."""
+    rec = _record() if push.ENABLED else None
+    if rec and rec.get("push"):
+        try:
+            push.unsubscribe(rec)
+        except Exception as e:
+            log.warning("Push: unsubscribing failed: %s", e)
+
+
+def _set_push_flag(on: bool) -> None:
+    """Remembers in the (sealed) session cookie whether this browser is subscribed."""
+    entry = g.entry
+    with _lock:
+        if bool(entry["rec"].get("push")) != on:
+            entry["rev"] += 1
+            entry["rec"] = {**entry["rec"], "push": on, "rev": entry["rev"]}
+
+
+def _push_token() -> str:
+    token = str(body().get("token") or "")
+    if not 20 <= len(token) <= 4096:
+        abort(400)
+    return token
+
+
+@app.get("/api/push/config")
+def push_config():
+    return jsonify(push.client_config())
+
+
+@app.post("/api/push/subscribe")
+@api
+def push_subscribe():
+    if not push.ENABLED:
+        return jsonify(error="Push notifications aren't set up on this server"), 503
+    token = _push_token()
+    push.subscribe(g.entry["rec"], token, request.headers.get("User-Agent", ""))
+    _set_push_flag(True)
+    return jsonify(ok=True)
+
+
+@app.post("/api/push/unsubscribe")
+@api
+def push_unsubscribe():
+    if push.ENABLED:
+        push.unsubscribe(g.entry["rec"], _push_token())
+    _set_push_flag(False)
+    return jsonify(ok=True)
+
+
+@app.route("/cron/notify", methods=["GET", "POST"])
+def cron_notify():
+    """Called every few minutes by an external scheduler:
+    curl -H "Authorization: Bearer $MOTTOKAR_CRON_SECRET" https://<host>/cron/notify"""
+    if not push.CRON_SECRET:
+        abort(404)
+    auth = request.headers.get("Authorization", "")
+    supplied = auth[7:] if auth.startswith("Bearer ") else request.args.get("key", "")
+    if not supplied:
+        return jsonify(error="Missing secret"), 401
+    if not hmac.compare_digest(supplied.encode(), push.CRON_SECRET.encode()):
+        log.warning("Cron: wrong secret from %s", client_ip())
+        return jsonify(error="Wrong secret"), 403
+    if not push.ENABLED:
+        return jsonify(error="Push notifications aren't configured (FIREBASE_SERVICE_ACCOUNT, MOTTOKAR_SECRET_KEY)"), 503
+    return jsonify(push.run_cron(PROVIDERS))
 
 
 if __name__ == "__main__":

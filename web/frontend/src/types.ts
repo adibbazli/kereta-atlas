@@ -7,7 +7,9 @@ export type CommandParam =
 
 export type CommandDef = { id: string; label: string; isPinRequired?: boolean; isDestructive?: boolean; params?: CommandParam[] };
 
-export type Me = { signedIn: true; provider: string; accountLabel?: string; commands: CommandDef[] } | { signedIn: false };
+export type Me =
+  | { signedIn: true; provider: string; accountLabel?: string; commands: CommandDef[]; push?: boolean }
+  | { signedIn: false };
 
 export type ProviderInfo = { id: string; name: string; fields: { key: string; label: string; type: string; help?: string }[] };
 

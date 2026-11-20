@@ -45,6 +45,14 @@ _STATE: Dict[str, Any] = {
 }
 
 
+# Messages made by demo commands, newest first. Module-level, so every client in this process (a
+# browser's, or the push cron's) sees the same inbox. Lost on restart, like the rest of the demo.
+_COMMAND_NOTICES: List[Dict[str, Any]] = []
+_NOTICE_TEXT = {"lock": "was locked", "unlock": "was unlocked", "horn_lights": "flashed its lights and sounded the horn",
+                "engine_start": "engine started", "engine_stop": "engine stopped", "climate_on": "climate turned on",
+                "climate_off": "climate turned off", "windows_close": "windows closed", "windows_open": "windows opened"}
+
+
 def sign_in(values: Dict[str, str]) -> Dict[str, Any]:
     return {"session": {"token": "demo"}, "accountLabel": (values.get("name") or "").strip()[:40] or "Demo driver"}
 
@@ -52,7 +60,7 @@ def sign_in(values: Dict[str, str]) -> Dict[str, Any]:
 class DemoClient:
     provider = {"id": "demo", "name": "Demo car", "commands": COMMANDS}
 
-    def __init__(self, session: Dict[str, Any], save_session=None):
+    def __init__(self, session: Dict[str, Any], save_session=None, reload_session=None):
         self.state = copy.deepcopy(_STATE)
         # Like Proton's cloud copy: the timestamp only moves when the car "uploads" (a change).
         self.uploaded_at = time.time() * 1000
@@ -127,6 +135,12 @@ class DemoClient:
             s["windowPositions"] = {p: 8 for p in _POSITIONS}
             s["isVentilating"] = True
         self.uploaded_at = time.time() * 1000
+        if command in _NOTICE_TEXT:
+            now = time.time() * 1000
+            _COMMAND_NOTICES.insert(0, {"id": f"cmd-{int(now)}", "title": "Remote control",
+                                        "body": f"Demo S70 {_NOTICE_TEXT[command]}.", "createdAt": now,
+                                        "kind": "security", "isRead": False})
+            del _COMMAND_NOTICES[20:]
         return {"isOk": True, "message": "Done", "isConfirmed": True}
 
     def simulate_part(self, vin: str, part: str) -> None:
@@ -176,9 +190,12 @@ class DemoClient:
     def notices(self) -> List[Dict[str, Any]]:
         now = time.time() * 1000
         return [
+            *(dict(n) for n in _COMMAND_NOTICES),
             {"id": "n1", "title": "Service due soon", "body": "Your next service is in 800 km.", "createdAt": now - 3600_000, "kind": "service", "isRead": False},
             {"id": "n2", "title": "Vehicle locked", "body": "Demo S70 was locked remotely.", "createdAt": now - 86_400_000, "isRead": True, "kind": "security"},
         ]
 
     def mark_read(self, notice_id: str) -> None:
-        pass
+        for n in _COMMAND_NOTICES:
+            if n["id"] == notice_id:
+                n["isRead"] = True

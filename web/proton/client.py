@@ -176,8 +176,9 @@ def sign_in(values: Dict[str, str]) -> Dict[str, Any]:
 class ProtonClient:
     provider = {"id": "proton", "name": "Proton Link 2.0", "commands": COMMANDS}
 
-    def __init__(self, session: Dict[str, Any], save_session: Callable[[Dict[str, Any]], None]):
-        self.api = ProtonApi(session, save_session)
+    def __init__(self, session: Dict[str, Any], save_session: Callable[[Dict[str, Any]], None],
+                 reload_session: Optional[Callable[[], Optional[Dict[str, Any]]]] = None):
+        self.api = ProtonApi(session, save_session, reload_session)
         self._infos: Dict[str, Dict[str, Any]] = {}
         self._supported_cache: Dict[str, Optional[List[str]]] = {}
         self._pool = ThreadPoolExecutor(max_workers=4)
