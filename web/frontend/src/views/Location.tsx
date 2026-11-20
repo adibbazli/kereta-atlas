@@ -6,6 +6,8 @@ import { useCar } from "../car";
 import { MapView } from "../components/MapView";
 import { Card, Empty, Segmented, Spinner, Stat } from "../components/ui";
 import { ago, dateTime, isoDate, n, rangeDays, shortDate } from "../format";
+import { FuelCost } from "../components/FuelCost";
+import { fuelBasis, tripFuel, type FuelBasis } from "../fuel";
 import type { Location as Loc, Trip, TripRange } from "../types";
 
 /** Readings the server set aside (see web/proton/mappers.py check_trip_fuel). "missing" is just no data. */
@@ -25,35 +27,8 @@ const FUEL_FLAG: Record<"refuel" | "low" | "high", { tag: string; why: string }>
 };
 const fuelFlag = (t: Trip) => (t.fuelFlag && t.fuelFlag !== "missing" ? FUEL_FLAG[t.fuelFlag] : null);
 
-/** Average used to estimate refuel trips. The car's own figure first, else the measured trips in range. */
-type FuelBasis = { lPer100km: number; source: "car" | "range" };
-const plausible = (v?: number | null) => v != null && v >= 3 && v <= 30;
-
-function measuredAvg(trips: Trip[]) {
-  let litres = 0, km = 0;
-  for (const t of trips) if (t.fuelUsedL != null && t.distanceKm) { litres += t.fuelUsedL; km += t.distanceKm; }
-  return km > 0 ? (litres / km) * 100 : null;
-}
-
-function fuelBasis(carAvg: number | null | undefined, trips: Trip[] | undefined): FuelBasis | null {
-  if (plausible(carAvg)) return { lPer100km: carAvg!, source: "car" };
-  const r = trips ? measuredAvg(trips) : null;
-  return plausible(r) ? { lPer100km: r!, source: "range" } : null;
-}
-
 const basisLabel = (b: FuelBasis) =>
   `${n(b.lPer100km, 1)} L/100 km (${b.source === "car" ? "the car’s average" : "this range’s measured average"})`;
-
-/**
- * Fuel to show for a trip. A refuel during the trip ruins the car's reading ("refuel", "low"), so those
- * trips are estimated as distance × average consumption. A "high" reading is a glitch, not a refuel: left empty.
- */
-function tripFuel(t: Trip, basis: FuelBasis | null) {
-  if (t.fuelUsedL != null) return { litres: t.fuelUsedL, lPer100km: t.fuelLPer100km ?? null, estimated: false };
-  if ((t.fuelFlag === "refuel" || t.fuelFlag === "low") && basis && t.distanceKm)
-    return { litres: (t.distanceKm * basis.lPer100km) / 100, lPer100km: basis.lPer100km, estimated: true };
-  return null;
-}
 
 const PRESETS: { value: TripRange["preset"]; label: string }[] = [
   { value: "7", label: "7 days" },
@@ -102,6 +77,8 @@ export function Location() {
       <RangePicker range={trips.range} onChange={loadTrips} />
 
       {trips.data && <Summary trips={trips.data} basis={basis} />}
+
+      {trips.data && trips.data.length > 0 && <FuelCost trips={trips.data} range={trips.range} basis={basis} />}
 
       <Card title={<><Route size={16} /> Trips · {rangeLabel(trips.range)}</>}>
         {trips.loading && !trips.data ? (

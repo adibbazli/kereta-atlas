@@ -375,3 +375,13 @@ input:focus { border-color: var(--text); }
 }
 .warn-text { color: var(--warn); }
 .note { margin: 0; }
+
+/* ---------- fuel cost by month ---------- */
+.cost-table { display: flex; flex-direction: column; }
+.cost-row { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 16px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.cost-row:last-child { border-bottom: 0; }
+.cost-row > span { display: flex; flex-direction: column; gap: 2px; }
+.cost-row small { font-size: 0.78rem; font-weight: 400; }
+.cost-row .cost { text-align: right; font-weight: 650; align-items: flex-end; }
+.cost-row.total { font-weight: 650; border-top: 1px solid var(--line); }
+@media (max-width: 420px) { .cost-row { grid-template-columns: 1fr auto; } .cost-row > span:nth-child(2) { grid-row: 2; } }

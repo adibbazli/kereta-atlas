@@ -99,6 +99,14 @@ export type Trip = {
 /** Trip filter. Presets are relative to today, so Refresh keeps them current. Dates are local YYYY-MM-DD. */
 export type TripRange = { preset: "7" | "30" | "90" | "custom"; from: string; to: string };
 
+/** Weekly pump prices from data.gov.my, RM per litre. `date` is the first day each price applies. */
+export type FuelPrices = {
+  source: string;
+  fetchedAt: number;
+  stale?: boolean;
+  weeks: { date: string; budi95: number | null; ron95: number | null }[];
+};
+
 export type Notice = { id: string; title: string; body?: string | null; createdAt: number; isRead?: boolean; kind?: string | null };
 
 export type DataUsage = { usedBytes?: number | null; remainingBytes?: number | null } | null;

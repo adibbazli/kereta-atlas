@@ -38,3 +38,6 @@ yarn-error.*
 app-example
 
 *.pyc
+
+# fetched data cache
+web/instance/fuelprice.json

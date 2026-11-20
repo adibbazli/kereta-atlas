@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 
 import demo
+from fuelprice import FuelPriceError, FuelPrices
 from gate import Gate, RateLimiter
 from live import LiveManager
 from timers import Timers
@@ -63,6 +64,7 @@ _lock = threading.Lock()
 _clients: Dict[str, Any] = {}
 timers = Timers()
 live = LiveManager(BASE / "instance" / "live.json")
+fuel_prices = FuelPrices(BASE / "instance" / "fuelprice.json")
 
 
 def _load() -> Dict[str, Any]:
@@ -507,6 +509,16 @@ def track(vin):
     if not start or not end or end <= start:
         abort(400)
     return jsonify(g.client.trip_track(vin, start, end))
+
+
+@app.get("/api/fuel-prices")
+@api
+def get_fuel_prices():
+    # Weekly pump prices (RM/L) from data.gov.my; @api only so it needs a signed-in session like the rest.
+    try:
+        return jsonify(fuel_prices.get())
+    except FuelPriceError as e:
+        return jsonify(error=str(e)), 502
 
 
 @app.get("/api/notices")
