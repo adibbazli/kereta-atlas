@@ -58,6 +58,7 @@ export function Location() {
                   <span>{dateTime(t.startedAt)}</span>
                   <span className="muted">
                     {n(t.distanceKm, 1)} km · {n(t.durationMin)} min
+                    {t.fuelUsedL != null && <> · {n(t.fuelUsedL, 1)} L</>}
                   </span>
                 </button>
               </li>
@@ -91,6 +92,8 @@ function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
         <Stat label="Distance" value={`${n(trip.distanceKm, 1)} km`} />
         <Stat label="Duration" value={`${n(trip.durationMin)} min`} />
         <Stat label="Avg speed" value={`${n(trip.avgSpeedKmh)} km/h`} />
+        <Stat label="Fuel used" value={`${n(trip.fuelUsedL, 2)} L`} />
+        <Stat label="Avg consumption" value={`${n(trip.fuelLPer100km, 1)} L/100 km`} />
       </div>
       <Card>{error ? <p className="error">{error}</p> : !points ? <Spinner /> : points.length > 1 ? <MapView points={points} route /> : <Empty>No route for this trip.</Empty>}</Card>
     </div>

@@ -244,13 +244,20 @@ def map_trip(t: Dict[str, Any], i: int) -> Optional[Dict[str, Any]]:
     dur = _minutes(t.get("tripUseTimes"))
     if dur is None and end:
         dur = (end - start) / 60_000
+    km = num(t.get("tripUseMiles"))
+    # tripPowerCns: litres of fuel used on the trip. 0 means the car didn't report it.
+    litres = num(t.get("tripPowerCns"))
+    if litres is not None and litres <= 0:
+        litres = None
     return {
         "id": f"{int(start)}-{i}",
         "startedAt": start,
         "endedAt": end,
-        "distanceKm": num(t.get("tripUseMiles")),
+        "distanceKm": km,
         "durationMin": dur,
         "avgSpeedKmh": num(t.get("avgSpeed")),
+        "fuelUsedL": litres,
+        "fuelLPer100km": round(litres / km * 100, 1) if litres is not None and km else None,
         "start": coord(t.get("tripStartLatitude"), t.get("tripStartLongitude")),
         "end": coord(t.get("tripEndLatitude"), t.get("tripEndLongitude")),
     }

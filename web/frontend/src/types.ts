@@ -86,6 +86,10 @@ export type Trip = {
   distanceKm?: number | null;
   durationMin?: number | null;
   avgSpeedKmh?: number | null;
+  /** Litres of fuel used on the trip, as reported by the car. */
+  fuelUsedL?: number | null;
+  /** Average consumption, derived from litres used ÷ distance. */
+  fuelLPer100km?: number | null;
 };
 
 export type Notice = { id: string; title: string; body?: string | null; createdAt: number; isRead?: boolean; kind?: string | null };

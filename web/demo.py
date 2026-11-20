@@ -153,6 +153,8 @@ class DemoClient:
             out.append({
                 "id": f"t{i}", "startedAt": start, "endedAt": start + mins * 60_000, "durationMin": mins,
                 "distanceKm": round(mins * 0.7, 1), "avgSpeedKmh": 42,
+                "fuelLPer100km": round(6.2 + (i * 7) % 30 / 10, 1),
+                "fuelUsedL": round(mins * 0.7 * (6.2 + (i * 7) % 30 / 10) / 100, 2),
                 "start": {"latitude": 3.139, "longitude": 101.6869},
                 "end": {"latitude": 3.139 + 0.002 * mins, "longitude": 101.6869 + 0.0015 * mins},
             })
