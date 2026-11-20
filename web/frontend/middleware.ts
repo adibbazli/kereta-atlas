@@ -22,6 +22,11 @@ export default async function middleware(request: Request): Promise<Response> {
   for (const h of STRIP_REQUEST) headers.delete(h);
   headers.set("x-forwarded-host", url.host);
   headers.set("x-forwarded-proto", url.protocol.replace(":", ""));
+  // The Flask guard only accepts writes whose Origin matches its own host. A browser request from
+  // this site carries the Vercel origin, so after checking it here, present the backend's origin.
+  // A foreign Origin is passed through unchanged, and the backend still rejects it.
+  const origin = request.headers.get("origin");
+  if (origin === url.origin) headers.set("origin", target.origin);
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   const upstream = await fetch(target, {
