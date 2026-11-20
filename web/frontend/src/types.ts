@@ -92,6 +92,9 @@ export type Trip = {
   fuelLPer100km?: number | null;
 };
 
+/** Trip filter. Presets are relative to today, so Refresh keeps them current. Dates are local YYYY-MM-DD. */
+export type TripRange = { preset: "7" | "30" | "90" | "custom"; from: string; to: string };
+
 export type Notice = { id: string; title: string; body?: string | null; createdAt: number; isRead?: boolean; kind?: string | null };
 
 export type DataUsage = { usedBytes?: number | null; remainingBytes?: number | null } | null;

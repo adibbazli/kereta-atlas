@@ -16,6 +16,7 @@ import logging
 import os
 import secrets
 import threading
+import time
 from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -489,7 +490,13 @@ def data_usage(vin):
 @app.get("/api/vehicles/<vin>/trips")
 @api
 def trips(vin):
-    return jsonify(g.client.trips(vin))
+    # Range in epoch ms; defaults to the last 30 days. Capped at a year so one call stays bounded.
+    now = int(time.time() * 1000)
+    end = request.args.get("end", type=int) or now
+    start = request.args.get("start", type=int) or end - 30 * 86_400_000
+    if end <= start or end - start > 366 * 86_400_000:
+        abort(400)
+    return jsonify(g.client.trips(vin, start, end))
 
 
 @app.get("/api/vehicles/<vin>/track")

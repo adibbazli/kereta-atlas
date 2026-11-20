@@ -365,3 +365,11 @@ input:focus { border-color: var(--text); }
 @media (max-width: 760px) {
   .topbar { padding-top: max(10px, env(safe-area-inset-top)); padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
 }
+
+/* ---------- trip date range ---------- */
+.range-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+.range-form .range-note { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 480px) {
+  .range-form { grid-template-columns: 1fr 1fr; }
+  .range-form .btn { grid-column: 1 / -1; }
+}

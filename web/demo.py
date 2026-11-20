@@ -144,11 +144,13 @@ class DemoClient:
     def data_usage(self, vin: str):
         return {"usedBytes": 1.2 * 1024 ** 3, "remainingBytes": 3.8 * 1024 ** 3}
 
-    def trips(self, vin: str) -> List[Dict[str, Any]]:
-        now = time.time() * 1000
+    def trips(self, vin: str, range_start: int, range_end: int) -> List[Dict[str, Any]]:
+        now = min(time.time() * 1000, range_end)
         out = []
-        for i in range(12):
+        for i in range(200):
             start = now - (i + 1) * 9 * 3600_000
+            if start < range_start:
+                break
             mins = 12 + (i * 17) % 50
             out.append({
                 "id": f"t{i}", "startedAt": start, "endedAt": start + mins * 60_000, "durationMin": mins,

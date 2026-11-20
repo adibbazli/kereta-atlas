@@ -52,3 +52,29 @@ export function fuelPercent(litres?: number | null, tank?: number | null, report
   if (litres != null && tank) return { pct: Math.min(100, (litres / tank) * 100), estimated: true };
   return { pct: null, estimated: false };
 }
+
+/** Local calendar date as YYYY-MM-DD (what <input type="date"> uses). */
+export const isoDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const parseDay = (s: string) => {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+};
+
+/** The days a range covers, as dates. Presets count back from today, today included. */
+export function rangeDays(r: { preset: string; from: string; to: string }, today = new Date()) {
+  if (r.preset === "custom") return { from: r.from, to: r.to };
+  const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (Number(r.preset) - 1));
+  return { from: isoDate(from), to: isoDate(today) };
+}
+
+/** Start of the first day to end of the last (capped at now), in epoch ms. */
+export function rangeMs(r: { preset: string; from: string; to: string }, now = Date.now()) {
+  const { from, to } = rangeDays(r, new Date(now));
+  const end = parseDay(to);
+  end.setDate(end.getDate() + 1);
+  return { start: parseDay(from).getTime(), end: Math.min(end.getTime() - 1, now) };
+}
+
+export const shortDate = (s: string) => parseDay(s).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });

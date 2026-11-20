@@ -279,12 +279,27 @@ class ProtonClient:
 
     # -- trips --
 
-    def trips(self, vin: str) -> List[Dict[str, Any]]:
-        end = int(time.time() * 1000)
-        items = self.api.atlas("bigdata/vehicle/trip/queryList/app/v1", "POST", body={
-            "startTime": end - 30 * 86_400_000, "endTime": end, "vin": vin,
-            "isPage": True, "currentPage": 1, "pageSize": 50}) or []
-        return [t for t in (map_trip(t, i) for i, t in enumerate(items)) if t]
+    TRIP_PAGE = 50
+    TRIP_MAX_PAGES = 20  # 1,000 trips per range
+
+    def trips(self, vin: str, start: int, end: int) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        for page in range(1, self.TRIP_MAX_PAGES + 1):
+            batch = self.api.atlas("bigdata/vehicle/trip/queryList/app/v1", "POST", body={
+                "startTime": start, "endTime": end, "vin": vin,
+                "isPage": True, "currentPage": page, "pageSize": self.TRIP_PAGE}) or []
+            items.extend(batch)
+            if len(batch) < self.TRIP_PAGE:
+                break
+        trips = [t for t in (map_trip(t, i) for i, t in enumerate(items)) if t]
+        # Drop repeats (in case the server ignores paging) and anything outside the range.
+        seen, out = set(), []
+        for t in trips:
+            if t["startedAt"] in seen or not start <= t["startedAt"] <= end:
+                continue
+            seen.add(t["startedAt"])
+            out.append(t)
+        return sorted(out, key=lambda t: t["startedAt"], reverse=True)
 
     def trip_track(self, vin: str, start: int, end: int) -> List[Dict[str, float]]:
         points = self.api.atlas("bigdata/vehicle/trip/queryTrackList/app/v1", "POST", body={

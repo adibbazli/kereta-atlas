@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { api, vinPath } from "./api";
-import type { CommandDef, CommandResult, DataUsage, LiveState, Notice, StatusResponse, Timer, Trip, Vehicle, VehicleStatus } from "./types";
+import { rangeMs } from "./format";
+import type { CommandDef, CommandResult, DataUsage, LiveState, Notice, StatusResponse, Timer, Trip, TripRange, Vehicle, VehicleStatus } from "./types";
 
 /**
  * Data is fetched once per car and then only when the user presses Refresh: no polling.
@@ -42,8 +43,9 @@ type CarCtx = {
   stopLive: () => Promise<void>;
   /** Demo car only: open/close a door, the bonnet or the trunk. */
   simulate: (part: string) => Promise<void>;
-  trips: Lazy<Trip[]>;
-  loadTrips: () => void;
+  trips: Lazy<Trip[]> & { range: TripRange };
+  /** Loads trips for the given range, or again for the current one. */
+  loadTrips: (range?: TripRange) => void;
   notices: Lazy<Notice[]>;
   loadNotices: () => void;
   usage: Lazy<DataUsage>;
@@ -52,6 +54,8 @@ type CarCtx = {
   toast: (text: string, kind?: Toast["kind"]) => void;
   signOut: () => Promise<void>;
 };
+
+const DEFAULT_TRIP_RANGE: TripRange = { preset: "30", from: "", to: "" };
 
 const Ctx = createContext<CarCtx | null>(null);
 export const useCar = () => {
@@ -160,7 +164,8 @@ export function CarProvider(props: {
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState<string>();
   const [pendingByVin, setPendingByVin] = useState<Record<string, Set<string>>>({});
-  const [tripsByVin, setTrips] = useState<Record<string, Lazy<Trip[]>>>({});
+  const [tripsByVin, setTrips] = useState<Record<string, Lazy<Trip[]> & { range: TripRange }>>({});
+  const tripsReq = useRef(0);
   const [usageByVin, setUsage] = useState<Record<string, Lazy<DataUsage>>>({});
   const [notices, setNotices] = useState<Lazy<Notice[]>>({ loading: false });
   const [busy, setBusy] = useState<string | null>(null);
@@ -243,7 +248,23 @@ export function CarProvider(props: {
     [],
   );
 
-  const loadTrips = useCallback(() => lazyLoad<Trip[]>(setTrips, vin, vinPath(vin, "/trips")), [lazyLoad, vin]);
+  const loadTrips = useCallback(
+    async (next?: TripRange) => {
+      const range = next ?? tripsByVin[vin]?.range ?? DEFAULT_TRIP_RANGE;
+      const req = ++tripsReq.current;
+      const { start, end } = rangeMs(range);
+      // A new range starts empty; a refresh of the same range keeps showing the old list meanwhile.
+      setTrips((m) => ({ ...m, [vin]: { data: next ? undefined : m[vin]?.data, range, loading: true } }));
+      try {
+        const data = await api<Trip[]>(vinPath(vin, `/trips?start=${start}&end=${end}`));
+        // A newer range was asked for while this one loaded: drop it.
+        if (req === tripsReq.current) setTrips((m) => ({ ...m, [vin]: { data, range, loading: false } }));
+      } catch (e) {
+        if (req === tripsReq.current) setTrips((m) => ({ ...m, [vin]: { data: next ? undefined : m[vin]?.data, range, loading: false, error: (e as Error).message } }));
+      }
+    },
+    [vin, tripsByVin],
+  );
   const loadUsage = useCallback(() => lazyLoad<DataUsage>(setUsage, vin, vinPath(vin, "/data-usage")), [lazyLoad, vin]);
   const loadNotices = useCallback(async () => {
     setNotices((n) => ({ ...n, loading: true, error: undefined }));
@@ -457,7 +478,7 @@ export function CarProvider(props: {
       startLive,
       stopLive,
       simulate,
-      trips: tripsByVin[vin] ?? { loading: false },
+      trips: tripsByVin[vin] ?? { loading: false, range: DEFAULT_TRIP_RANGE },
       loadTrips,
       notices,
       loadNotices,
