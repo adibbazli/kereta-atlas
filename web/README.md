@@ -40,6 +40,11 @@ cloudflared prints a random `https://….trycloudflare.com` URL, which changes e
 - **Cloudflare can read the traffic.** TLS ends at Cloudflare's edge, so Cloudflare can see it, including your Proton password when you sign in through the tunnel. For a stable hostname with Cloudflare's own login in front, use a named tunnel with Cloudflare Access.
 - **The server is Flask's built-in one,** which is fine for personal use behind the tunnel.
 - **State directory:** sessions, gate tokens and caches go in `instance/`. Set `MOTTOKAR_INSTANCE_DIR` to move them; on Vercel (`VERCEL` set) the default is `/tmp/mottokar`, because the deployment is read-only there. Files in `/tmp` are lost whenever the function restarts.
+- **Serverless hosts (Vercel):** set `MOTTOKAR_SECRET_KEY` (e.g. `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`) and `MOTTOKAR_PASSCODE`. With the secret set, nothing about sign-in lives on the server's disk:
+  - The session record, Proton tokens included, is stored in the `mk_sid` cookie, encrypted with AES-256-GCM. When tokens are refreshed, the next response carries an updated cookie.
+  - Gate cookies are signed with an expiry, and they're tied to the passcode.
+  - Changing the secret signs out every browser. Changing the passcode locks every browser out of the gate.
+  - Sign out and "Lock this browser" only delete the cookie in that browser. A copied cookie stays valid until it expires or the secret changes.
 
 ## Install on iPhone (PWA)
 
@@ -94,7 +99,7 @@ cloudflared prints a random `https://….trycloudflare.com` URL, which changes e
 | Data | Where | Notes |
 |---|---|---|
 | Password | Nowhere | MD5-hashed (Proton's scheme) and sent once to `app.acotech.my:8443/app/v1/member/login`, then dropped |
-| Access/refresh tokens, device ids | `web/instance/sessions.json` (mode 0600) | Keyed by SHA-256 of the session cookie |
+| Access/refresh tokens, device ids | `web/instance/sessions.json` (mode 0600), or the encrypted session cookie when `MOTTOKAR_SECRET_KEY` is set | File entries are keyed by SHA-256 of the session cookie |
 | Session cookie | Browser | Random, HttpOnly, SameSite=Strict, 90 days |
 | Vehicle PIN | Tab memory by default; browser localStorage (per car) if you tick "Remember on this device"; server memory only while a climate auto-off is pending | Never sent to the server's disk. A saved PIN is removed by "Forget saved PIN" in the account menu, or automatically when the car rejects it. Anyone who can open the app in that browser can send PIN commands |
 

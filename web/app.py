@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 
 import demo
+import sealed
 from fuelprice import FuelPriceError, FuelPrices
 from gate import Gate, RateLimiter
 from live import LiveManager
@@ -44,7 +45,7 @@ BASE = Path(__file__).resolve().parent
 INSTANCE = Path(os.environ.get("MOTTOKAR_INSTANCE_DIR")
                 or ("/tmp/mottokar" if os.environ.get("VERCEL") else BASE / "instance"))
 STORE = INSTANCE / "sessions.json"
-gate = Gate(INSTANCE) if PUBLIC else None
+gate = Gate(INSTANCE, stateless=sealed.ENABLED) if PUBLIC else None
 signin_limiter = RateLimiter(limit=5, window=900, global_limit=20)
 
 PROVIDERS = {
@@ -58,12 +59,25 @@ PROVIDERS = {
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("mottokar")
 app = Flask(__name__, static_folder=None)
+if os.environ.get("VERCEL") and not sealed.ENABLED:
+    log.warning("MOTTOKAR_SECRET_KEY is not set: sign-ins and gate cookies are kept in %s and are lost "
+                "on every cold start. Set it to keep them in encrypted cookies instead.", INSTANCE)
+if os.environ.get("VERCEL") and PUBLIC and not os.environ.get("MOTTOKAR_PASSCODE"):
+    log.warning("MOTTOKAR_PASSCODE is not set: the generated passcode is written to %s, which you can't "
+                "read on Vercel and which changes on every cold start.", INSTANCE)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
 
 
-# -- session store: keyed by sha256(cookie) so the file alone can't be replayed as a cookie --
+# -- session store --
+# Default: tokens in instance/sessions.json, keyed by sha256(cookie) so the file alone can't be
+# replayed as a cookie. With MOTTOKAR_SECRET_KEY (needed on serverless hosts, whose disk is wiped
+# on every cold start), the whole record is sealed into the cookie instead; see sealed.py.
 
+SESSION_DAYS = 90
+_SEAL = "session"
 _lock = threading.Lock()
+# owner key -> {"client", "rec", "rev"}; rev counts token refreshes, so a sealed cookie that
+# predates a refresh made by this process (or a newer one from another instance) is detected.
 _clients: Dict[str, Any] = {}
 timers = Timers()
 live = LiveManager(INSTANCE / "live.json")
@@ -91,36 +105,57 @@ def _key(sid: str) -> str:
 
 
 def _record() -> Optional[Dict[str, Any]]:
-    sid = request.cookies.get(COOKIE)
-    if not sid:
-        return None
-    with _lock:
-        return _load().get(_key(sid))
+    if "rec" not in g:
+        raw = request.cookies.get(COOKIE)
+        rec = None
+        if raw and sealed.ENABLED:
+            rec = sealed.unseal(raw, _SEAL)
+            if not isinstance(rec, dict) or rec.get("exp", 0) < time.time() or rec.get("provider") not in PROVIDERS:
+                rec = None
+        elif raw:
+            with _lock:
+                rec = _load().get(_key(raw))
+        g.rec = rec
+    return g.rec
 
 
 def _owner() -> str:
+    if sealed.ENABLED:
+        rec = _record()
+        return _key(rec["id"] if rec else "")
     return _key(request.cookies.get(COOKIE, ""))
 
 
-def _client():
-    sid = request.cookies.get(COOKIE)
-    rec = _record()
-    if not sid or not rec:
-        abort(401)
-    k = _key(sid)
-    with _lock:
-        c = _clients.get(k)
-        if c is None:
-            def save_session(session, k=k):
-                with _lock:
-                    data = _load()
-                    if k in data:
-                        data[k]["session"] = session
-                        _save(data)
+def _set_session_cookie(resp, value: str) -> None:
+    resp.set_cookie(COOKIE, value, httponly=True, samesite="Strict", secure=is_public(),
+                    max_age=SESSION_DAYS * 86400, path="/")
 
-            c = PROVIDERS[rec["provider"]]["client"](rec["session"], save_session)
-            _clients[k] = c
-    return c
+
+def _client():
+    rec = _record()
+    if not rec:
+        abort(401)
+    k = _owner()
+    with _lock:
+        entry = _clients.get(k)
+        # Another instance refreshed the tokens and the browser brought the newer cookie.
+        if entry is None or (sealed.ENABLED and rec.get("rev", 0) > entry["rev"]):
+            entry = {"rec": rec, "rev": rec.get("rev", 0)}
+
+            def save_session(session, k=k, entry=entry):
+                with _lock:
+                    entry["rev"] += 1
+                    entry["rec"] = {**entry["rec"], "session": session, "rev": entry["rev"]}
+                    if not sealed.ENABLED:
+                        data = _load()
+                        if k in data:
+                            data[k]["session"] = session
+                            _save(data)
+
+            entry["client"] = PROVIDERS[rec["provider"]]["client"](rec["session"], save_session)
+            _clients[k] = entry
+        g.entry = entry
+    return entry["client"]
 
 
 # -- request hardening --
@@ -173,6 +208,10 @@ def headers(resp):
         resp.headers["Strict-Transport-Security"] = "max-age=31536000"
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
+    # Tokens were refreshed (in this request, or earlier by a background poller): reseal the cookie.
+    entry, rec = g.get("entry"), g.get("rec")
+    if sealed.ENABLED and entry and rec and entry["rev"] > rec.get("rev", 0) and _clients.get(_owner()) is entry:
+        _set_session_cookie(resp, sealed.seal(entry["rec"], _SEAL))
     return resp
 
 
@@ -298,13 +337,18 @@ def signin():
     except ProviderError:
         signin_limiter.fail(ip)
         raise
+    rec = {"provider": pid, "session": res["session"], "accountLabel": res.get("accountLabel")}
+    resp = jsonify(ok=True)
+    if sealed.ENABLED:
+        rec.update(id=secrets.token_urlsafe(16), rev=0, exp=int(time.time()) + SESSION_DAYS * 86400)
+        _set_session_cookie(resp, sealed.seal(rec, _SEAL))
+        return resp
     sid = secrets.token_urlsafe(32)
     with _lock:
         store = _load()
-        store[_key(sid)] = {"provider": pid, "session": res["session"], "accountLabel": res.get("accountLabel")}
+        store[_key(sid)] = rec
         _save(store)
-    resp = jsonify(ok=True)
-    resp.set_cookie(COOKIE, sid, httponly=True, samesite="Strict", secure=is_public(), max_age=90 * 86400, path="/")
+    _set_session_cookie(resp, sid)
     return resp
 
 
@@ -312,11 +356,12 @@ def signin():
 def signout():
     sid = request.cookies.get(COOKIE)
     if sid:
-        k = _key(sid)
+        k = _owner()
         with _lock:
-            store = _load()
-            store.pop(k, None)
-            _save(store)
+            if not sealed.ENABLED:
+                store = _load()
+                store.pop(k, None)
+                _save(store)
             _clients.pop(k, None)
         timers.forget_owner(k)
     resp = jsonify(ok=True)
