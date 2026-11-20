@@ -90,6 +90,10 @@ export type Trip = {
   fuelUsedL?: number | null;
   /** Average consumption, derived from litres used ÷ distance. */
   fuelLPer100km?: number | null;
+  /** What the car sent, before the sanity check. Negative when the tank was refuelled during the trip. */
+  fuelReportedL?: number | null;
+  /** Why fuelUsedL is empty: no reading, refuel (negative), low or high (implausible). */
+  fuelFlag?: "missing" | "refuel" | "low" | "high" | null;
 };
 
 /** Trip filter. Presets are relative to today, so Refresh keeps them current. Dates are local YYYY-MM-DD. */

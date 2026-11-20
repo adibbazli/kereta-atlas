@@ -236,6 +236,31 @@ def _minutes(v: Any) -> Optional[float]:
     return ms / 60_000 if ms is not None else None
 
 
+# Trip fuel sanity bounds. tripPowerCns behaves like "fuel level at start - fuel level at end", so a
+# refuel while the engine is running (one trip) makes it negative, or smaller than what was burnt.
+# See docs/trip-fuel-refuel.md.
+FUEL_CHECK_MIN_KM = 3.0        # below this, sensor resolution makes L/100 km meaningless
+FUEL_MIN_L_PER_100KM = 3.0     # no petrol car in the range does better over a real trip
+FUEL_MAX_L_PER_100KM = 30.0
+FUEL_MAX_IDLE_L_PER_H = 2.5    # stationary / crawling: engine-on burn per hour
+FUEL_SLACK_L = 0.5             # tank-sensor resolution
+
+
+def check_trip_fuel(reported: Optional[float], km: Optional[float], minutes: Optional[float]):
+    """Returns (litres to trust or None, flag). Flags: missing, refuel, low, high; None when it looks right."""
+    if reported is None or reported == 0:
+        return None, "missing"
+    if reported < 0:
+        return None, "refuel"
+    km = km or 0.0
+    hours = (minutes or 0.0) / 60
+    if km >= FUEL_CHECK_MIN_KM and reported / km * 100 < FUEL_MIN_L_PER_100KM:
+        return None, "low"
+    if reported > max(km * FUEL_MAX_L_PER_100KM / 100, hours * FUEL_MAX_IDLE_L_PER_H) + FUEL_SLACK_L:
+        return None, "high"
+    return reported, None
+
+
 def map_trip(t: Dict[str, Any], i: int) -> Optional[Dict[str, Any]]:
     start = num(t.get("tripStartTime"))
     if start is None:
@@ -245,10 +270,9 @@ def map_trip(t: Dict[str, Any], i: int) -> Optional[Dict[str, Any]]:
     if dur is None and end:
         dur = (end - start) / 60_000
     km = num(t.get("tripUseMiles"))
-    # tripPowerCns: litres of fuel used on the trip. 0 means the car didn't report it.
-    litres = num(t.get("tripPowerCns"))
-    if litres is not None and litres <= 0:
-        litres = None
+    # tripPowerCns: litres of fuel used on the trip, as the car reports it (can be wrong, see above).
+    reported = num(t.get("tripPowerCns"))
+    litres, flag = check_trip_fuel(reported, km, dur)
     return {
         "id": f"{int(start)}-{i}",
         "startedAt": start,
@@ -258,6 +282,8 @@ def map_trip(t: Dict[str, Any], i: int) -> Optional[Dict[str, Any]]:
         "avgSpeedKmh": num(t.get("avgSpeed")),
         "fuelUsedL": litres,
         "fuelLPer100km": round(litres / km * 100, 1) if litres is not None and km else None,
+        "fuelReportedL": reported,
+        "fuelFlag": flag,
         "start": coord(t.get("tripStartLatitude"), t.get("tripStartLongitude")),
         "end": coord(t.get("tripEndLatitude"), t.get("tripEndLongitude")),
     }

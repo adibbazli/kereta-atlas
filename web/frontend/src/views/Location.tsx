@@ -8,6 +8,53 @@ import { Card, Empty, Segmented, Spinner, Stat } from "../components/ui";
 import { ago, dateTime, isoDate, n, rangeDays, shortDate } from "../format";
 import type { Location as Loc, Trip, TripRange } from "../types";
 
+/** Readings the server set aside (see web/proton/mappers.py check_trip_fuel). "missing" is just no data. */
+const FUEL_FLAG: Record<"refuel" | "low" | "high", { tag: string; why: string }> = {
+  refuel: {
+    tag: "refuelled",
+    why: "The car reported a negative amount, which happens when you refuel with the engine running. It measures fuel as tank level at the start minus tank level at the end.",
+  },
+  low: {
+    tag: "fuel reading too low",
+    why: "The car reported less fuel than this distance could use. That usually means a top-up during the trip cancelled out part of what was burnt.",
+  },
+  high: {
+    tag: "fuel reading too high",
+    why: "The car reported more fuel than this distance and time could use, so the reading is likely a sensor glitch.",
+  },
+};
+const fuelFlag = (t: Trip) => (t.fuelFlag && t.fuelFlag !== "missing" ? FUEL_FLAG[t.fuelFlag] : null);
+
+/** Average used to estimate refuel trips. The car's own figure first, else the measured trips in range. */
+type FuelBasis = { lPer100km: number; source: "car" | "range" };
+const plausible = (v?: number | null) => v != null && v >= 3 && v <= 30;
+
+function measuredAvg(trips: Trip[]) {
+  let litres = 0, km = 0;
+  for (const t of trips) if (t.fuelUsedL != null && t.distanceKm) { litres += t.fuelUsedL; km += t.distanceKm; }
+  return km > 0 ? (litres / km) * 100 : null;
+}
+
+function fuelBasis(carAvg: number | null | undefined, trips: Trip[] | undefined): FuelBasis | null {
+  if (plausible(carAvg)) return { lPer100km: carAvg!, source: "car" };
+  const r = trips ? measuredAvg(trips) : null;
+  return plausible(r) ? { lPer100km: r!, source: "range" } : null;
+}
+
+const basisLabel = (b: FuelBasis) =>
+  `${n(b.lPer100km, 1)} L/100 km (${b.source === "car" ? "the car’s average" : "this range’s measured average"})`;
+
+/**
+ * Fuel to show for a trip. A refuel during the trip ruins the car's reading ("refuel", "low"), so those
+ * trips are estimated as distance × average consumption. A "high" reading is a glitch, not a refuel: left empty.
+ */
+function tripFuel(t: Trip, basis: FuelBasis | null) {
+  if (t.fuelUsedL != null) return { litres: t.fuelUsedL, lPer100km: t.fuelLPer100km ?? null, estimated: false };
+  if ((t.fuelFlag === "refuel" || t.fuelFlag === "low") && basis && t.distanceKm)
+    return { litres: (t.distanceKm * basis.lPer100km) / 100, lPer100km: basis.lPer100km, estimated: true };
+  return null;
+}
+
 const PRESETS: { value: TripRange["preset"]; label: string }[] = [
   { value: "7", label: "7 days" },
   { value: "30", label: "30 days" },
@@ -23,7 +70,8 @@ export function Location() {
     if (!trips.data && !trips.loading && !trips.error) loadTrips();
   }, [trips, loadTrips]);
   if (!status) return null;
-  if (trip) return <TripDetail trip={trip} onBack={() => setTrip(null)} />;
+  const basis = fuelBasis(status?.status.avgFuelLPer100km, trips.data);
+  if (trip) return <TripDetail trip={trip} basis={basis} onBack={() => setTrip(null)} />;
   const loc = status.location;
 
   return (
@@ -53,7 +101,7 @@ export function Location() {
 
       <RangePicker range={trips.range} onChange={loadTrips} />
 
-      {trips.data && <Summary trips={trips.data} />}
+      {trips.data && <Summary trips={trips.data} basis={basis} />}
 
       <Card title={<><Route size={16} /> Trips · {rangeLabel(trips.range)}</>}>
         {trips.loading && !trips.data ? (
@@ -70,7 +118,7 @@ export function Location() {
                   <span>{dateTime(t.startedAt)}</span>
                   <span className="muted">
                     {n(t.distanceKm, 1)} km · {n(t.durationMin)} min
-                    {t.fuelUsedL != null && <> · {n(t.fuelUsedL, 1)} L</>}
+                    <TripFuelText trip={t} basis={basis} />
                   </span>
                 </button>
               </li>
@@ -82,7 +130,18 @@ export function Location() {
   );
 }
 
-function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
+function TripFuelText({ trip, basis }: { trip: Trip; basis: FuelBasis | null }) {
+  const f = tripFuel(trip, basis);
+  const flag = fuelFlag(trip);
+  return (
+    <>
+      {f && <> · {f.estimated ? "≈ " : ""}{n(f.litres, 1)} L</>}
+      {flag && <> · <span className="warn-text">{flag.tag}</span></>}
+    </>
+  );
+}
+
+function TripDetail({ trip, basis, onBack }: { trip: Trip; basis: FuelBasis | null; onBack: () => void }) {
   const { vehicle } = useCar();
   const [points, setPoints] = useState<Loc[] | null>(null);
   const [error, setError] = useState<string>();
@@ -93,6 +152,8 @@ function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
       .then(setPoints)
       .catch((e) => setError((e as Error).message));
   }, [trip, vehicle.vin]);
+  const fuel = tripFuel(trip, basis);
+  const flag = fuelFlag(trip);
 
   return (
     <div className="stack">
@@ -104,9 +165,23 @@ function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
         <Stat label="Distance" value={`${n(trip.distanceKm, 1)} km`} />
         <Stat label="Duration" value={`${n(trip.durationMin)} min`} />
         <Stat label="Avg speed" value={`${n(trip.avgSpeedKmh)} km/h`} />
-        <Stat label="Fuel used" value={`${n(trip.fuelUsedL, 2)} L`} />
-        <Stat label="Avg consumption" value={`${n(trip.fuelLPer100km, 1)} L/100 km`} />
+        <Stat
+          label="Fuel used"
+          value={fuel ? `${fuel.estimated ? "≈ " : ""}${n(fuel.litres, 2)} L` : "— L"}
+          sub={flag ? `${fuel?.estimated ? "Estimated · " : ""}car reported ${n(trip.fuelReportedL, 2)} L` : undefined}
+        />
+        <Stat label="Avg consumption" value={fuel?.lPer100km != null ? `${fuel.estimated ? "≈ " : ""}${n(fuel.lPer100km, 1)} L/100 km` : "—"} />
       </div>
+      {flag && (
+        <p className="note warn-text small">
+          {flag.why}{" "}
+          {fuel?.estimated
+            ? `Fuel used is estimated from the distance at ${basisLabel(basis!)}.`
+            : trip.fuelFlag === "high"
+              ? "It’s left out of the range totals."
+              : "There’s no average consumption to estimate from yet, so it’s left out of the range totals."}
+        </p>
+      )}
       <Card>{error ? <p className="error">{error}</p> : !points ? <Spinner /> : points.length > 1 ? <MapView points={points} route /> : <Empty>No route for this trip.</Empty>}</Card>
     </div>
   );
@@ -176,23 +251,36 @@ function RangePicker({ range, onChange }: { range: TripRange; onChange: (r: Trip
   );
 }
 
-/** Totals for the trips in range. Average consumption only counts trips that reported fuel, so missing data doesn't drag it down. */
-function Summary({ trips }: { trips: Trip[] }) {
+/**
+ * Totals for the trips in range. Fuel used includes refuel trips at their estimate. Average consumption counts
+ * measured trips only: estimates come from an average, so folding them back in would just pull it toward itself.
+ */
+function Summary({ trips, basis }: { trips: Trip[]; basis: FuelBasis | null }) {
   const s = useMemo(() => {
-    let km = 0, fuelKm = 0, litres = 0, withFuel = 0, mins = 0;
+    let km = 0, fuelKm = 0, measured = 0, withFuel = 0, mins = 0, estimatedL = 0, estimatedN = 0;
     for (const t of trips) {
       km += t.distanceKm ?? 0;
       mins += t.durationMin ?? 0;
-      if (t.fuelUsedL != null) {
-        litres += t.fuelUsedL;
+      const f = tripFuel(t, basis);
+      if (!f) continue;
+      if (f.estimated) {
+        estimatedL += f.litres;
+        estimatedN++;
+      } else {
+        measured += f.litres;
         withFuel++;
         fuelKm += t.distanceKm ?? 0;
       }
     }
-    return { km, litres, withFuel, mins, avg: withFuel && fuelKm > 0 ? (litres / fuelKm) * 100 : null };
-  }, [trips]);
+    return { km, measured, withFuel, mins, estimatedL, estimatedN, avg: withFuel && fuelKm > 0 ? (measured / fuelKm) * 100 : null };
+  }, [trips, basis]);
   if (!trips.length) return null;
   const partial = s.withFuel > 0 && s.withFuel < trips.length;
+  const uncounted = trips.length - s.withFuel - s.estimatedN;
+  const fuelSub = [
+    s.estimatedN > 0 && `Incl. ≈ ${n(s.estimatedL, 1)} L estimated for ${s.estimatedN} refuel ${s.estimatedN === 1 ? "trip" : "trips"}`,
+    uncounted > 0 && `${uncounted} ${uncounted === 1 ? "trip" : "trips"} not counted (no usable reading)`,
+  ].filter(Boolean).join(" · ");
 
   return (
     <Card title={<><Fuel size={16} /> Fuel · this range</>}>
@@ -202,7 +290,11 @@ function Summary({ trips }: { trips: Trip[] }) {
           value={s.avg != null ? `${n(s.avg, 1)} L/100 km` : "—"}
           sub={s.avg != null ? (partial ? `From ${s.withFuel} of ${trips.length} trips` : `${n(s.avg ? 100 / s.avg : null, 1)} km/L`) : "No fuel data for these trips"}
         />
-        <Stat label="Fuel used" value={s.withFuel ? `${n(s.litres, 1)} L` : "—"} sub={partial ? `${trips.length - s.withFuel} trips without fuel data` : undefined} />
+        <Stat
+          label="Fuel used"
+          value={s.withFuel || s.estimatedN ? `${s.estimatedN ? "≈ " : ""}${n(s.measured + s.estimatedL, 1)} L` : "—"}
+          sub={fuelSub || undefined}
+        />
         <Stat label="Distance" value={`${n(s.km, 1)} km`} sub={`${trips.length} ${trips.length === 1 ? "trip" : "trips"}`} />
         <Stat label="Time driving" value={s.mins >= 60 ? `${Math.floor(s.mins / 60)} h ${Math.round(s.mins % 60)} min` : `${n(s.mins)} min`} />
       </div>

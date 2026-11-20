@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from proton.api import ProviderError
 from proton.client import COMMANDS as PROTON_COMMANDS
-from proton.mappers import _label
+from proton.mappers import _label, map_trip
 
 DEMO_PIN = "1234"
 # Commands that need the PIN in the demo, to exercise the PIN step.
@@ -152,14 +152,21 @@ class DemoClient:
             if start < range_start:
                 break
             mins = 12 + (i * 17) % 50
-            out.append({
-                "id": f"t{i}", "startedAt": start, "endedAt": start + mins * 60_000, "durationMin": mins,
-                "distanceKm": round(mins * 0.7, 1), "avgSpeedKmh": 42,
-                "fuelLPer100km": round(6.2 + (i * 7) % 30 / 10, 1),
-                "fuelUsedL": round(mins * 0.7 * (6.2 + (i * 7) % 30 / 10) / 100, 2),
-                "start": {"latitude": 3.139, "longitude": 101.6869},
-                "end": {"latitude": 3.139 + 0.002 * mins, "longitude": 101.6869 + 0.0015 * mins},
-            })
+            km = round(mins * 0.7, 1)
+            litres = round(km * (6.2 + (i * 7) % 30 / 10) / 100, 2)
+            # Refuelled with the engine running: the car reports fuel level start - end.
+            if i % 11 == 4:
+                litres = round(litres - 32.0, 2)   # filled up: negative
+            elif i % 11 == 9:
+                litres = round(litres - 0.9 * litres, 2)   # topped up a little: too small
+            trip = map_trip({
+                "tripStartTime": start, "tripEndTime": start + mins * 60_000, "tripUseTimes": str(mins * 60_000),
+                "tripUseMiles": km, "avgSpeed": 42, "tripPowerCns": litres,
+                "tripStartLatitude": 3.139, "tripStartLongitude": 101.6869,
+                "tripEndLatitude": 3.139 + 0.002 * mins, "tripEndLongitude": 101.6869 + 0.0015 * mins,
+            }, i)
+            if trip:
+                out.append(trip)
         return out
 
     def trip_track(self, vin: str, start: int, end: int) -> List[Dict[str, float]]:

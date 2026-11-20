@@ -373,3 +373,5 @@ input:focus { border-color: var(--text); }
   .range-form { grid-template-columns: 1fr 1fr; }
   .range-form .btn { grid-column: 1 / -1; }
 }
+.warn-text { color: var(--warn); }
+.note { margin: 0; }
