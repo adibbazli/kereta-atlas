@@ -40,8 +40,11 @@ PUBLIC_HOSTS = [h.strip().lower() for h in os.environ.get("MOTTOKAR_PUBLIC_HOSTS
 COOKIE = "mk_sid"
 GATE_COOKIE = "mk_gate"
 BASE = Path(__file__).resolve().parent
-STORE = BASE / "instance" / "sessions.json"
-gate = Gate(BASE / "instance") if PUBLIC else None
+# Writable state directory. Serverless hosts (Vercel) only allow writes under /tmp.
+INSTANCE = Path(os.environ.get("MOTTOKAR_INSTANCE_DIR")
+                or ("/tmp/mottokar" if os.environ.get("VERCEL") else BASE / "instance"))
+STORE = INSTANCE / "sessions.json"
+gate = Gate(INSTANCE) if PUBLIC else None
 signin_limiter = RateLimiter(limit=5, window=900, global_limit=20)
 
 PROVIDERS = {
@@ -63,8 +66,8 @@ app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
 _lock = threading.Lock()
 _clients: Dict[str, Any] = {}
 timers = Timers()
-live = LiveManager(BASE / "instance" / "live.json")
-fuel_prices = FuelPrices(BASE / "instance" / "fuelprice.json")
+live = LiveManager(INSTANCE / "live.json")
+fuel_prices = FuelPrices(INSTANCE / "fuelprice.json")
 
 
 def _load() -> Dict[str, Any]:

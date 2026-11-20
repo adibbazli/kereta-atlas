@@ -39,6 +39,7 @@ cloudflared prints a random `https://….trycloudflare.com` URL, which changes e
 - **Other hosts:** only `*.trycloudflare.com` is accepted (`MOTTOKAR_PUBLIC_HOSTS` changes this), and POST requests must come from that same `https://` origin.
 - **Cloudflare can read the traffic.** TLS ends at Cloudflare's edge, so Cloudflare can see it, including your Proton password when you sign in through the tunnel. For a stable hostname with Cloudflare's own login in front, use a named tunnel with Cloudflare Access.
 - **The server is Flask's built-in one,** which is fine for personal use behind the tunnel.
+- **State directory:** sessions, gate tokens and caches go in `instance/`. Set `MOTTOKAR_INSTANCE_DIR` to move them; on Vercel (`VERCEL` set) the default is `/tmp/mottokar`, because the deployment is read-only there. Files in `/tmp` are lost whenever the function restarts.
 
 ## Install on iPhone (PWA)
 
