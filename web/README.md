@@ -75,6 +75,15 @@ New inbox messages can be pushed to the installed app or a desktop browser, even
 
    `?key=<secret>` works too, for schedulers that can't set headers. The host must be one the server answers to (see `MOTTOKAR_PUBLIC_HOSTS`); on Vercel, the frontend forwards `/cron/*` like `/api/*`. The reply counts what was checked, sent, deferred and expired.
 
+4. To test, send a message of your own to every subscribed device. Test messages aren't recorded as sent, so you can send the same one again:
+
+   ```bash
+   curl -fsS -H "Authorization: Bearer $MOTTOKAR_CRON_SECRET" \
+     "https://<host>/cron/send?title=Hello&body=Test%20from%20cron"
+   ```
+
+   A JSON body (`{"title": …, "body": …, "url": "/#/inbox"}`) works too. `url` is where tapping the notification opens, and must be a path in this app.
+
 **How it works**
 
 - **Turning it on:** in the account menu, choose "Turn on notifications". The browser's FCM token and a copy of the Proton session are stored in Firestore, under a hash of the account. The session copy is sealed with `MOTTOKAR_SECRET_KEY`, like the cookie.

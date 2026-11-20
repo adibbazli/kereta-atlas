@@ -211,6 +211,22 @@ def _check(sub: Dict[str, Any], providers: Dict[str, Any], stats: Dict[str, int]
     firebase.update_doc(path, {"lastCheckedAt": _now_ms(), "recentIds": recent[:RECENT_MAX]})
 
 
+def broadcast(title: str, body: str, url: str = "/#/inbox") -> Dict[str, int]:
+    """Sends one message to every device of every subscriber, active or not. Not recorded in sent/."""
+    stats = {"subscribers": 0, "devices": 0, "sent": 0, "errors": 0, "tokensRemoved": 0}
+    payload = {"title": title, "body": body, "url": url, "tag": f"test-{_now_ms()}"}
+    for sub in firebase.list_docs("subscribers"):
+        path = _sub_path(sub["_id"])
+        tokens = firebase.list_docs(f"{path}/tokens")
+        stats["subscribers"] += 1
+        stats["devices"] += len(tokens)
+        before = stats["errors"] + stats["tokensRemoved"]
+        _send_all(path, tokens, payload, stats)
+        stats["sent"] += len(tokens) - (stats["errors"] + stats["tokensRemoved"] - before)
+    log.info("Push broadcast: %s", stats)
+    return stats
+
+
 def _send_all(path: str, tokens: List[Dict[str, Any]], payload: Dict[str, str], stats: Dict[str, int]) -> List[Dict[str, Any]]:
     """Sends to every device; drops tokens FCM says are gone. Returns the tokens still valid."""
     alive = []

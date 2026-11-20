@@ -663,10 +663,8 @@ def push_unsubscribe():
     return jsonify(ok=True)
 
 
-@app.route("/cron/notify", methods=["GET", "POST"])
-def cron_notify():
-    """Called every few minutes by an external scheduler:
-    curl -H "Authorization: Bearer $MOTTOKAR_CRON_SECRET" https://<host>/cron/notify"""
+def _cron_auth():
+    """None if the request carries MOTTOKAR_CRON_SECRET (Bearer header or ?key=), else the error response."""
     if not push.CRON_SECRET:
         abort(404)
     auth = request.headers.get("Authorization", "")
@@ -678,7 +676,30 @@ def cron_notify():
         return jsonify(error="Wrong secret"), 403
     if not push.ENABLED:
         return jsonify(error="Push notifications aren't configured (FIREBASE_SERVICE_ACCOUNT, MOTTOKAR_SECRET_KEY)"), 503
-    return jsonify(push.run_cron(PROVIDERS))
+    return None
+
+
+@app.route("/cron/notify", methods=["GET", "POST"])
+def cron_notify():
+    """Called every few minutes by an external scheduler:
+    curl -H "Authorization: Bearer $MOTTOKAR_CRON_SECRET" https://<host>/cron/notify"""
+    return _cron_auth() or jsonify(push.run_cron(PROVIDERS))
+
+
+@app.route("/cron/send", methods=["GET", "POST"])
+def cron_send():
+    """Sends a custom message to every subscribed device (for testing; not recorded, so it can repeat).
+    Parameters (query string, or a JSON/form body): title, body, url (where a tap opens; default the inbox)."""
+    denied = _cron_auth()
+    if denied:
+        return denied
+    params = {**request.args, **request.form, **(request.get_json(silent=True) or {})}
+    title = str(params.get("title") or "Mottokar test").strip()[:100]
+    text = str(params.get("body") or "Push notifications are working.").strip()[:500]
+    url = str(params.get("url") or "/#/inbox")
+    if not url.startswith("/"):
+        abort(400)  # a tap may only open this app
+    return jsonify(push.broadcast(title, text, url))
 
 
 if __name__ == "__main__":
