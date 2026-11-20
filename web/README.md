@@ -16,7 +16,7 @@ python3 -m venv .venv
 .venv/bin/python app.py
 ```
 
-Open http://127.0.0.1:5050. Choose **Demo car** to try a simulated S70 (demo PIN 1234), or **Proton Link 2.0** to sign in with your Proton Link mobile number and password. For frontend work, `npm run dev` in `frontend/` serves on :5173 and proxies `/api` to Flask.
+Open http://127.0.0.1:5050. Choose **Demo car** to try a simulated S70 (demo PIN 1234), or **Proton Link 2.0** to sign in with your Proton Link mobile number and password. For frontend work, `npm run dev` in `frontend/` serves on :5173 and proxies `/api` to Flask. Set `BACKEND_SERVER` to change the Vite development proxy target; it defaults to `http://127.0.0.1:5050`.
 
 On macOS's system Python, urllib3 prints a `NotOpenSSLWarning` about LibreSSL. It's harmless: TLS verification still works.
 
