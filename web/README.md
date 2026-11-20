@@ -2,6 +2,10 @@
 
 A browser version of Mottokar: a Flask backend that talks to Proton Link, and a React + TypeScript single-page app (Vite) in `frontend/`. The app is built into `static/`, which Flask serves. Python port of `src/providers/proton/*` and `src/providers/demo`.
 
+## Deploy the frontend on Vercel
+
+Set the Vercel project's **Root Directory** to `web/frontend` and use `npm run build` as the build command. Vite writes the Vercel build to `dist/`; regular builds continue writing to `web/static/` for Flask.
+
 ## Run
 
 ```bash
