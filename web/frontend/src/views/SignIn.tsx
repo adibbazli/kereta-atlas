@@ -4,7 +4,7 @@ import { api } from "../api";
 import { Segmented, Spinner } from "../components/ui";
 import type { ProviderInfo } from "../types";
 
-export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+export function SignIn({ onSignedIn, notice }: { onSignedIn: () => void; notice?: string }) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [pid, setPid] = useState("proton");
   const [error, setError] = useState<string>();
@@ -36,6 +36,11 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       <div className="signin-card">
         <div className="brand-lg">Mottokar</div>
         <p className="muted">Connect your car</p>
+        {notice && (
+          <p className="notice" role="alert">
+            {notice}
+          </p>
+        )}
         {!provider ? (
           error ? <p className="error">{error}</p> : <Spinner />
         ) : (

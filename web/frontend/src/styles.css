@@ -52,6 +52,8 @@ svg { flex-shrink: 0; }
 .muted { color: var(--muted); }
 .small { font-size: 0.82rem; }
 .error { color: var(--bad); }
+.notice { margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 0.9rem; text-align: left;
+  background: color-mix(in srgb, var(--warn) 14%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .stack { display: flex; flex-direction: column; gap: 16px; }

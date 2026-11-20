@@ -39,6 +39,7 @@ function SignedInApp() {
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [error, setError] = useState<string>();
   const [gated, setGated] = useState(false);
+  const [signedOutNotice, setSignedOutNotice] = useState<string>();
 
   const boot = useCallback(async () => {
     setError(undefined);
@@ -58,7 +59,8 @@ function SignedInApp() {
       setMe(null);
       setVehicles(null);
     });
-    setSignedOutHandler(() => {
+    setSignedOutHandler((reason) => {
+      setSignedOutNotice(reason);
       setMe({ signedIn: false });
       setVehicles(null);
     });
@@ -76,7 +78,16 @@ function SignedInApp() {
       </div>
     );
   if (!me) return <div className="center-screen"><Spinner /></div>;
-  if (!me.signedIn) return <SignIn onSignedIn={boot} />;
+  if (!me.signedIn)
+    return (
+      <SignIn
+        notice={signedOutNotice}
+        onSignedIn={() => {
+          setSignedOutNotice(undefined);
+          boot();
+        }}
+      />
+    );
   if (!vehicles) return <div className="center-screen"><Spinner /></div>;
   if (!vehicles.length) return <div className="center-screen"><p>No vehicles on this account.</p></div>;
 

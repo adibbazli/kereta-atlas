@@ -8,8 +8,12 @@ export class ApiError extends Error {
   }
 }
 
-let onSignedOut: () => void = () => {};
-export const setSignedOutHandler = (fn: () => void) => (onSignedOut = fn);
+let onSignedOut: (reason: string) => void = () => {};
+/** Called when the server no longer accepts this browser's session (expired, or replaced by a sign-in elsewhere). */
+export const setSignedOutHandler = (fn: (reason: string) => void) => (onSignedOut = fn);
+
+export const SESSION_EXPIRED =
+  "Your session has expired, or this account was signed in on another device. Please sign in again.";
 let onGate: () => void = () => {};
 /** Called when the server wants the access passcode (public URL, not yet unlocked). */
 export const setGateHandler = (fn: () => void) => (onGate = fn);
@@ -32,7 +36,8 @@ export async function api<T>(path: string, opts: { method?: "GET" | "POST"; body
   if (!res.ok) {
     const d = (data ?? {}) as { error?: string; reauth?: boolean; gate?: boolean };
     if (res.status === 401 && d.gate) onGate();
-    else if (res.status === 401 && d.reauth && path !== "/api/signin") onSignedOut();
+    // Any other 401 means the session is gone; never leave the UI waiting on it.
+    else if (res.status === 401 && path !== "/api/signin") onSignedOut(SESSION_EXPIRED);
     throw new ApiError(d.error || `Request failed (${res.status})`, res.status, !!d.reauth);
   }
   return data as T;

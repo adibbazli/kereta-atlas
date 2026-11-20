@@ -210,7 +210,8 @@ def headers(resp):
         resp.headers["Cache-Control"] = "no-store"
     # Tokens were refreshed (in this request, or earlier by a background poller): reseal the cookie.
     entry, rec = g.get("entry"), g.get("rec")
-    if sealed.ENABLED and entry and rec and entry["rev"] > rec.get("rev", 0) and _clients.get(_owner()) is entry:
+    if (sealed.ENABLED and resp.status_code != 401 and entry and rec and entry["rev"] > rec.get("rev", 0)
+            and _clients.get(_owner()) is entry):
         _set_session_cookie(resp, sealed.seal(entry["rec"], _SEAL))
     return resp
 
@@ -218,14 +219,23 @@ def headers(resp):
 @app.errorhandler(ProviderError)
 def provider_error(e: ProviderError):
     if e.reauth:
-        return jsonify(error=str(e), reauth=True), 401
+        return _signed_out(str(e))
     status = e.code if isinstance(e.code, int) and 400 <= e.code < 600 else 502
     return jsonify(error=str(e), code=e.code if not isinstance(e.code, int) else None), status
 
 
 @app.errorhandler(401)
 def unauthorized(_):
-    return jsonify(error="Not signed in", reauth=True), 401
+    return _signed_out("Not signed in")
+
+
+def _signed_out(message: str):
+    """The session is gone (expired, or Proton replaced it after a sign-in elsewhere): tell the
+    browser to sign in again and drop its dead cookie, so a reload doesn't resurrect it."""
+    resp = jsonify(error=message, reauth=True)
+    if request.cookies.get(COOKIE):
+        resp.delete_cookie(COOKIE, path="/")
+    return resp, 401
 
 
 def body() -> Dict[str, Any]:
