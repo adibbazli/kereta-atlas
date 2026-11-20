@@ -254,6 +254,9 @@ input:focus { border-color: var(--text); }
 .list li + li { border-top: 1px solid var(--line); }
 .list-row { all: unset; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; padding: 12px 4px; width: 100%; box-sizing: border-box; flex-wrap: wrap; }
 .list-row:hover { color: var(--muted); }
+.sessions { display: flex; flex-direction: column; gap: 20px; }
+.session-head { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; padding: 0 4px 6px; border-bottom: 1px solid var(--line); }
+.session .list-row { padding-left: 16px; }
 .empty { color: var(--muted); padding: 8px 0; }
 
 /* ---------- inbox, toasts, sign-in ---------- */

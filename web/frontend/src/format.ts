@@ -15,6 +15,9 @@ export function ago(ms?: number | null, now = Date.now()) {
 export const dateTime = (ms?: number | null) =>
   ms ? new Date(ms).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
 
+export const clock = (ms?: number | null) =>
+  ms ? new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "—";
+
 export function countdown(endsAt: number, now = Date.now()) {
   const s = Math.max(0, Math.round((endsAt - now) / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;

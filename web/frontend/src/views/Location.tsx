@@ -5,8 +5,9 @@ import { api, vinPath } from "../api";
 import { useCar } from "../car";
 import { MapView } from "../components/MapView";
 import { Card, Empty, Segmented, Spinner, Stat } from "../components/ui";
-import { ago, dateTime, isoDate, n, rangeDays, shortDate } from "../format";
+import { ago, clock, dateTime, isoDate, n, rangeDays, shortDate } from "../format";
 import { FuelCost } from "../components/FuelCost";
+import { cachedSessions } from "../sessions";
 import { fuelBasis, tripFuel, type FuelBasis } from "../fuel";
 import type { Location as Loc, Trip, TripRange } from "../types";
 
@@ -39,7 +40,8 @@ const PRESETS: { value: TripRange["preset"]; label: string }[] = [
 const MAX_DAYS = 366;
 
 export function Location() {
-  const { status, trips, loadTrips } = useCar();
+  const { status, vehicle, trips, loadTrips } = useCar();
+  const sessions = useMemo(() => (trips.data ? cachedSessions(vehicle.vin, trips.data) : []), [vehicle.vin, trips.data]);
   const [trip, setTrip] = useState<Trip | null>(null);
   useEffect(() => {
     if (!trips.data && !trips.loading && !trips.error) loadTrips();
@@ -88,19 +90,34 @@ export function Location() {
         ) : !trips.data?.length ? (
           <Empty>No trips in this range.</Empty>
         ) : (
-          <ul className="list">
-            {trips.data.map((t) => (
-              <li key={t.id}>
-                <button className="list-row" onClick={() => setTrip(t)}>
-                  <span>{dateTime(t.startedAt)}</span>
-                  <span className="muted">
-                    {n(t.distanceKm, 1)} km · {n(t.durationMin)} min
-                    <TripFuelText trip={t} basis={basis} />
+          <div className="sessions">
+            {sessions.map((s) => (
+              <section key={s.key} className="session">
+                <header className="session-head">
+                  <strong>
+                    {dateTime(s.startedAt)}
+                    {s.endedAt && <> – {clock(s.endedAt)}</>}
+                  </strong>
+                  <span className="muted small">
+                    {s.trips.length} {s.trips.length === 1 ? "trip" : "trips"} · {n(s.km, 1)} km · {n(s.minutes)} min
                   </span>
-                </button>
-              </li>
+                </header>
+                <ul className="list">
+                  {s.trips.map((t) => (
+                    <li key={t.id}>
+                      <button className="list-row" onClick={() => setTrip(t)}>
+                        <span>{clock(t.startedAt)}</span>
+                        <span className="muted">
+                          {n(t.distanceKm, 1)} km · {n(t.durationMin)} min
+                          <TripFuelText trip={t} basis={basis} />
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         )}
       </Card>
     </div>

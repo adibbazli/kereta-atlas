@@ -22,14 +22,32 @@ export function dayLabel(ts: number) {
   return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 }
 
-export function groupByDay(trips: Trip[]) {
-  const groups: { key: string; label: string; trips: Trip[]; km: number }[] = [];
-  for (const t of [...trips].sort((a, b) => b.startedAt - a.startedAt)) {
-    const key = new Date(t.startedAt).toDateString();
-    let g = groups.find((x) => x.key === key);
-    if (!g) groups.push((g = { key, label: dayLabel(t.startedAt), trips: [], km: 0 }));
-    g.trips.push(t);
-    g.km += t.distanceKm ?? 0;
+/** A session is every trip that starts less than this long after the previous one: a 3 h stop is the same outing, 6 h starts a new session. */
+export const SESSION_GAP_MS = 6 * 3_600_000;
+
+export type TripSession = {
+  key: string;
+  startedAt: number;
+  endedAt?: number;
+  /** Oldest first, in the order they were driven. */
+  trips: Trip[];
+  km: number;
+  /** Engine-on time across the trips, not the wall-clock span. */
+  minutes: number;
+};
+
+/** Groups trips (one per engine on/off cycle, as the car reports them) into sessions. Newest session first. */
+export function groupBySession(trips: Trip[], gapMs = SESSION_GAP_MS): TripSession[] {
+  const sessions: TripSession[] = [];
+  for (const t of [...trips].sort((a, b) => a.startedAt - b.startedAt)) {
+    let s = sessions.at(-1);
+    if (!s || t.startedAt - s.trips[s.trips.length - 1].startedAt >= gapMs)
+      sessions.push((s = { key: t.id, startedAt: t.startedAt, trips: [], km: 0, minutes: 0 }));
+    s.trips.push(t);
+    s.km += t.distanceKm ?? 0;
+    s.minutes += t.durationMin ?? 0;
+    const end = t.endedAt ?? (t.durationMin != null ? t.startedAt + t.durationMin * 60_000 : undefined);
+    if (end != null) s.endedAt = Math.max(s.endedAt ?? 0, end);
   }
-  return groups;
+  return sessions.reverse();
 }
