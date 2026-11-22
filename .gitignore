@@ -39,5 +39,5 @@ app-example
 
 *.pyc
 
-# fetched data cache
-web/instance/fuelprice.json
+# server runtime state (sessions, passcode, cached data) — never commit
+web/instance/
